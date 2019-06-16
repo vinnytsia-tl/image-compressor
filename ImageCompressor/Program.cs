@@ -3,47 +3,121 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Windows.Forms;
+using System.Drawing.Drawing2D;
+using System.Text.RegularExpressions;
 
 namespace ImageCompressor
 {
     class Program
     {
+        const string SourceDirectory = "source";
+        const string ResultDirectory = "converted";
+
+        public static Bitmap GetResizedBitmap(Image image)
+        {
+            int width = image.Width;
+            int height = image.Height;
+
+            while (width > 1920 || height > 1920)
+            {
+                width /= 2;
+                height /= 2;
+            }
+
+            var destRect = new Rectangle(0, 0, width, height);
+            var destImage = new Bitmap(width, height);
+
+            destImage.SetResolution(image.HorizontalResolution, image.VerticalResolution);
+
+            using (var graphics = Graphics.FromImage(destImage))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                graphics.CompositingQuality = CompositingQuality.HighQuality;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.SmoothingMode = SmoothingMode.HighQuality;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                using (var wrapMode = new ImageAttributes())
+                {
+                    wrapMode.SetWrapMode(WrapMode.TileFlipXY);
+                    graphics.DrawImage(image, destRect, 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, wrapMode);
+                }
+            }
+
+            return destImage;
+        }
+
+        static void CompressJpeg(string source, string dest)
+        {
+            var sourceImage = Image.FromFile(source);
+
+            using (var resizedImage = GetResizedBitmap(sourceImage))
+            using (var memory = new MemoryStream())
+            {
+                resizedImage.Save(memory, ImageFormat.Png);
+
+                using (var pngImage = Image.FromStream(memory))
+                    pngImage.Save(dest, ImageFormat.Jpeg);
+            }
+        }
+
+        static bool Compress(string source, string dest)
+        {
+            try
+            {
+                var ext = new FileInfo(source).Extension.ToLower();
+                switch (ext)
+                {
+                    case ".jpg":
+                    case ".jpeg":
+                        CompressJpeg(source, dest);
+                        return true;
+                    default:
+                        Console.WriteLine("Unknown extention: {0}. Can't compress {1}.", ext, source);
+                        File.Copy(source, dest);
+                        return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Can't compress {0}. Exception: {1}.",
+                    source, ex.Message);
+
+                return false;
+            }
+        }
+
         static void Main(string[] args)
         {
-            string[] files = Directory.GetFiles("source\\", "*", SearchOption.AllDirectories);
-            int countok = 0;
-            int counterr = 0;
-            int length = files.Length;
+            var regex = new Regex(Regex.Escape(SourceDirectory));
+            if (!Directory.Exists(SourceDirectory))
+                Directory.CreateDirectory(SourceDirectory);
+            if (!Directory.Exists(ResultDirectory))
+                Directory.CreateDirectory(ResultDirectory);
+
+            var sourceFiles = Directory.GetFiles(SourceDirectory, "*", SearchOption.AllDirectories);
+
             ParallelOptions parallelOptions = new ParallelOptions();
             parallelOptions.MaxDegreeOfParallelism = 16;
-            Action<int> body = i =>
-            {
-                try
+
+            int processed = 0;
+            Parallel.ForEach(sourceFiles, parallelOptions, (file) =>
                 {
-                    string path = Path.GetDirectoryName(files[i]).Replace("source\\", "converted\\");
-                    if (!Directory.Exists(path))
-                        Directory.CreateDirectory(path);
-                    string str = string.Format("tmp\\tmp{0}.png", (object)i);
-                    string filename = string.Format("{0}\\{1}.jpg", (object)path, (object)Path.GetFileNameWithoutExtension(files[i]));
-                    Image image1 = Image.FromFile(files[i]);
-                    image1.Save(str, ImageFormat.Png);
-                    image1.Dispose();
-                    Image image2 = Image.FromFile(str);
-                    image2.Save(filename, ImageFormat.Jpeg);
-                    image2.Dispose();
-                    File.Delete(str);
-                    ++countok;
+                    var dest = regex.Replace(file, ResultDirectory, 1);
+                    var destDir = Path.GetDirectoryName(dest);
+                    if (!Directory.Exists(destDir))
+                        Directory.CreateDirectory(destDir);
+
+                    var res = Compress(file, dest);
+
+                    processed++;
+                    Console.WriteLine("{0} of {1}: {2} - {3}",
+                        processed, sourceFiles.Length, file, res ? "ok" : "fail");
                 }
-                catch
-                {
-                    ++counterr;
-                    Console.WriteLine("Error in converting file: {0}", (object)files[i]);
-                }
-                Console.WriteLine("{0} Images converted from {1}. Error count: {2}", (object)countok, (object)files.Length, (object)counterr);
-            };
-            Parallel.For(0, length, parallelOptions, body);
-            int num = (int)MessageBox.Show(string.Format("{0} Images converted from {1}. Error count: {2}\n Job done!", (object)countok, (object)files.Length, (object)counterr));
+            );
+
+            Console.WriteLine("Job done!");
+            Console.ReadLine();
         }
     }
 }
