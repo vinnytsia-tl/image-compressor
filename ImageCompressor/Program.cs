@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using System.Drawing;
@@ -14,7 +14,7 @@ namespace ImageCompressor
         const string ResultDirectory = "converted";
         const string LogFile = "log.log";
 
-        static StreamWriter logWriter;
+        static TextWriter logWriter;
         public static void WriteLog(string format,  params object[] args)
         {
             var msg = string.Format(format, args);
@@ -104,7 +104,7 @@ namespace ImageCompressor
             if (!Directory.Exists(ResultDirectory))
                 Directory.CreateDirectory(ResultDirectory);
 
-            logWriter = new StreamWriter(LogFile);
+            logWriter = TextWriter.Synchronized(new StreamWriter(LogFile));
             logWriter.WriteLine("Started at {0}", DateTime.Now.ToString());
 
             var sourceFiles = Directory.GetFiles(SourceDirectory, "*", SearchOption.AllDirectories);
